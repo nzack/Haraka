@@ -41,6 +41,7 @@ process.on('uncaughtException', function (err) {
     process.on(sig, function () {
         process.title = path.basename(process.argv[1], '.js');
         logger.lognotice(sig + ' received');
+        server.sendToMaster('drainPools');
         logger.dump_and_exit(1);
     });
 });
