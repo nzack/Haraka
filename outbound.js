@@ -1097,7 +1097,7 @@ var cram_md5_response = function (username, password, challenge) {
 function get_pool (server, port, host, local_addr, connect_timeout, pool_timeout, max) {
     port = port || 25;
     host = host || 'localhost';
-    connect_timeout = (connect_timeout === undefined) ? 300 : connect_timeout;
+    connect_timeout = (connect_timeout === undefined) ? 30 : connect_timeout;
     pool_timeout = (pool_timeout === undefined) ? 300 : pool_timeout;
     var name = 'outbound::' + port + ':' + host + ':' + local_addr + ':' + pool_timeout;
     if (!server.notes.pool) {
