@@ -31,6 +31,20 @@ var STATE = {
     DESTROYED: 4,
 };
 
+/**
+ * This event is emitted to give the {SMTPClient} an opportunity to read
+ * all capabilities and respond to them before notifying any other listeners.
+ * This event will trigger the `capabilities` event when complete.
+ *
+ * For example, in the case of a TLS upgrade, there was a conflict where the
+ * upgrade was initiated and at the same time in smtp_forward.js the Auth
+ * flow was started at the same time.  This caused the server to reject
+ * all requests.
+ * @type {string}
+ */
+SMTPClient.EVENT_READ_CAPABILITIES = 'read-capabilities';
+
+
 function SMTPClient (port, host, connect_timeout, idle_timeout) {
     events.EventEmitter.call(this);
     this.uuid = utils.uuid();
@@ -66,15 +80,22 @@ function SMTPClient (port, host, connect_timeout, idle_timeout) {
             return;
         }
 
+        // Handles `login` auth flow
         if (client.command === 'auth') {
-            if (code.match(/^3/) && cont === 'VXNlcm5hbWU6') {
+            if (code.match(/^3/) && msg === 'VXNlcm5hbWU6') {
                 client.emit('auth_username');
                 return;
             }
-            else if (code.match(/^3/) && cont === 'UGFzc3dvcmQ6') {
+            else if (code.match(/^3/) && msg === 'UGFzc3dvcmQ6') {
                 client.emit('auth_password');
                 return;
             }
+            // May be GMail specific code? specific to `login` auth, may
+            // be different for `plain`
+            // else if (code.match(/^235/)) {
+            //     client.emit('rset');
+            //     return;
+            // }
         }
 
         if (client.command === 'ehlo') {
@@ -83,7 +104,9 @@ function SMTPClient (port, host, connect_timeout, idle_timeout) {
                 client.emit('greeting', 'HELO');
                 return;
             }
-            client.emit('capabilities');
+
+            client.emit(SMTPClient.EVENT_READ_CAPABILITIES);
+
             if (client.command !== 'ehlo') {
                 return;
             }
@@ -212,7 +235,24 @@ SMTPClient.prototype.send_command = function (command, data) {
     this.emit('client_protocol', line);
     this.command = command.toLowerCase();
     this.response = [];
-    this.socket.write(line + "\r\n");
+    var buffer = new Buffer(line + "\r\n");
+    console.log(buffer.toString('hex'));
+    this.socket.write(buffer);
+};
+
+/**
+ * A function to send raw data without changing the current
+ * command.
+ *
+ * The end of line signal will automatically be appended.
+ *
+ * @param {Buffer} data - The data to send.
+ */
+SMTPClient.prototype.send_data = function (data) {
+    this.emit('client_protocol', data);
+    this.response = [];
+    var buffer = new Buffer(data + "\r\n");
+    this.socket.write(buffer);
 };
 
 SMTPClient.prototype.start_data = function (data) {
@@ -392,7 +432,9 @@ exports.get_client_plugin = function (plugin, connection, c, callback) {
         smtp_client.on('greeting', helo);
         smtp_client.on('xclient', helo);
 
-        smtp_client.on('capabilities', function () {
+        // Read in all capabilities before firing the `capabilities` event
+        // to other listeners.
+        smtp_client.on(SMTPClient.EVENT_READ_CAPABILITIES, function () {
             var on_secured = function () {
                 secured = true;
                 smtp_client.emit('greeting', 'EHLO');
@@ -407,8 +449,8 @@ exports.get_client_plugin = function (plugin, connection, c, callback) {
 
                 if (smtp_client.response[line].match(/^STARTTLS/) && !secured) {
                     if (!(c.host in smtp_client.tls_config.no_tls_hosts) &&
-                        !(smtp_client.remote_ip in smtp_client.tls_config.no_tls_hosts) &&
-                        c.enable_tls)
+                      !(smtp_client.remote_ip in smtp_client.tls_config.no_tls_hosts) &&
+                      c.enable_tls)
                     {
                         smtp_client.socket.on('secure', on_secured);
                         smtp_client.send_command('STARTTLS');
@@ -425,6 +467,9 @@ exports.get_client_plugin = function (plugin, connection, c, callback) {
                     }
                 }
             }
+
+            // Emit this AFTER any other commands have been processed and run
+            smtp_client.emit('capabilities');
         });
 
         smtp_client.on('helo', function () {
