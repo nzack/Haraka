@@ -236,7 +236,6 @@ SMTPClient.prototype.send_command = function (command, data) {
     this.command = command.toLowerCase();
     this.response = [];
     var buffer = new Buffer(line + "\r\n");
-    console.log(buffer.toString('hex'));
     this.socket.write(buffer);
 };
 
